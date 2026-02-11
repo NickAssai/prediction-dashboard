@@ -1,34 +1,21 @@
 #!/usr/bin/env python3
 """
 OPINION.TRADE — OPTIMIZED MONITOR v3 (MAX SPEED ~45–75 сек)
-
-• Увеличены батчи и параллелизм до предела безопасного лимита (15 req/s)
-• CONCURRENCY_LIMIT=10 + BATCH_SIZE=40 + REQ_DELAY=0.25
-• Прогресс через tqdm (или fallback print)
-• Обработка ошибок, retries при 429
 """
 
 import asyncio
 import aiohttp
-import json
 import os
 from datetime import datetime, timezone
-
-try:
-    from tqdm import tqdm
-    TQDM_AVAILABLE = True
-except ImportError:
-    TQDM_AVAILABLE = False
 
 API_KEY = os.getenv("OPINION_API_KEY", "2SYhVH3RBM9FIclodBONiE1qQySEQpZN")
 BASE_URL = "https://openapi.opinion.trade/openapi"
 HEADERS = {"apikey": API_KEY, "User-Agent": "Mozilla/5.0"}
 
-# Оптимизированные для скорости параметры (15 req/s лимит API)
-BATCH_SIZE         = 40
-REQ_DELAY          = 0.25
-CONCURRENCY_LIMIT  = 10
-RETRY_DELAY_BASE   = 1.0
+BATCH_SIZE = 40
+REQ_DELAY = 0.25
+CONCURRENCY_LIMIT = 10
+RETRY_DELAY_BASE = 1.0
 
 
 async def fetch(session, url, params=None, retries=3):
@@ -45,7 +32,7 @@ async def fetch(session, url, params=None, retries=3):
                 if data.get("errno", 1) != 0:
                     return None
                 return data.get("result")
-        except Exception as e:
+        except Exception:
             if attempt == retries - 1:
                 pass
             await asyncio.sleep(0.5 * (attempt + 1))
@@ -83,29 +70,25 @@ async def process_batch(session, sem, batch):
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def main(progress_callback=None):
+async def main():
     async with aiohttp.ClientSession() as session:
-        # 1. Рынки (пагинация)
         markets = []
         page = 1
         while True:
             params = {"status": "activated", "marketType": 2, "limit": 20, "page": page}
             data = await fetch(session, f"{BASE_URL}/market", params)
-            if not 
+            if not data:
                 break
             page_markets = data.get("list", [])
             if not page_markets:
                 break
             markets.extend(page_markets)
-            if progress_callback:
-                progress_callback(f"Загружено страниц: {page}")
             page += 1
             await asyncio.sleep(0.2)
 
         if not markets:
             return {"error": "No markets"}
 
-        # 2. Токены
         tokens = []
         for m in markets:
             mtype = m.get("marketType")
@@ -119,17 +102,10 @@ async def main(progress_callback=None):
                     if tid and tid != "0":
                         tokens.append((child, tid, "yes"))
 
-        # 3. Обработка батчами
         sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
-        total = len(tokens)
-        processed = 0
-        
         for i in range(0, len(tokens), BATCH_SIZE):
             batch = tokens[i:i + BATCH_SIZE]
             await process_batch(session, sem, batch)
-            processed += len(batch)
-            if progress_callback:
-                progress_callback(f"Обработано токенов: {processed}/{total}")
             await asyncio.sleep(REQ_DELAY)
 
     return {
@@ -140,7 +116,6 @@ async def main(progress_callback=None):
     }
 
 
-def run(progress_callback=None):
-    """Запуск скрипта и возврат данных"""
-    return asyncio.run(main(progress_callback))
+def run():
+    return asyncio.run(main())
 
