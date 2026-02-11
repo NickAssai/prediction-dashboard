@@ -44,7 +44,7 @@ last_update.caption(f"⏱️ Обновлено: {datetime.now().strftime('%H:%M
 tab1, tab2 = st.tabs(["Opinion.Trade", "Predict.Fun"])
 
 with tab1:
-    if opinion_
+    if opinion_data:
         df = pd.DataFrame(opinion_data)
         if not df.empty and "title" in df.columns:
             cols_to_show = [c for c in ["title", "symbol", "volume24h", "price"] if c in df.columns]
@@ -59,7 +59,7 @@ with tab1:
         st.warning("Нет данных Opinion.Trade — проверь API ключ в Secrets")
 
 with tab2:
-    if predict_
+    if predict_data:
         processed = []
         for m in predict_data[:50]:
             dp = m.get("decimalPrecision", 2)
@@ -93,4 +93,5 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     
+    st.caption("Автообновление: каждые 30 сек")
     st.caption("Автообновление: каждые 30 сек")
