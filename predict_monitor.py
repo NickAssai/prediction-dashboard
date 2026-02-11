@@ -1,18 +1,9 @@
 """
 PREDICT.FUN — SNAPSHOT SCANNER (ASYNC ENHANCED)
-
-• Fetch only active (OPEN) markets
-• Support pagination to get all markets
-• Sort by 24h volume descending
-• For each market, fetch orderbook and stats asynchronously with concurrency limit
-• Include raw orderbook data (limited depth)
-• Compute complementary No prices with precision
-• Rate limit friendly (concurrency limited to 4, respecting 240/min ~4/sec)
 """
 
 import asyncio
 import aiohttp
-import json
 import os
 from datetime import datetime, timezone
 
@@ -28,30 +19,23 @@ CONCURRENCY_LIMIT = 4
 
 
 def get_complement(price, decimal_precision=2):
-    """Compute complementary price as per API docs"""
     if price is None:
         return None
     factor = 10 ** decimal_precision
     return (factor - round(price * factor)) / factor
 
 
-async def fetch(session, url, params=None, method="GET", json_data=None):
-    """Async fetch with session"""
+async def fetch(session, url, params=None):
     kwargs = {"headers": HEADERS, "params": params, "timeout": aiohttp.ClientTimeout(total=20)}
-    if method == "POST":
-        kwargs["json"] = json_data
-    async with session.request(method, url, **kwargs) as response:
+    async with session.get(url, **kwargs) as response:
         if response.status != 200:
             return None
         return await response.json()
 
 
-async def fetch_all_active_markets(session, progress_callback=None):
-    """Fetch all OPEN markets with pagination, sorted by 24h volume desc"""
+async def fetch_all_active_markets(session):
     markets = []
     after = None
-    page = 1
-    
     while True:
         params = {
             "status": "OPEN",
@@ -69,25 +53,19 @@ async def fetch_all_active_markets(session, progress_callback=None):
         page_markets = data.get("data", [])
         markets.extend(page_markets)
         
-        if progress_callback:
-            progress_callback(f"Страница {page}: {len(page_markets)} рынков")
-        
         after = data.get("cursor")
         if not after:
             break
         
-        page += 1
         await asyncio.sleep(0.1)
     
     return markets
 
 
-async def enhance_market(session, sem, market, progress_callback=None):
-    """Fetch additional data for a single market: orderbook, stats, compute prices"""
+async def enhance_market(session, sem, market):
     async with sem:
         market_id = market["id"]
         
-        # Fetch orderbook and stats in parallel
         ob_task = asyncio.create_task(fetch(session, f"{BASE_URL}/markets/{market_id}/orderbook"))
         stats_task = asyncio.create_task(fetch(session, f"{BASE_URL}/markets/{market_id}/stats"))
         
@@ -103,7 +81,6 @@ async def enhance_market(session, sem, market, progress_callback=None):
         else:
             market["stats"] = None
         
-        # Compute prices if orderbook available
         if market["orderbook"]:
             ob = market["orderbook"]
             dp = market.get("decimalPrecision", 2)
@@ -127,23 +104,16 @@ async def enhance_market(session, sem, market, progress_callback=None):
     return market
 
 
-async def main(progress_callback=None):
+async def main():
     async with aiohttp.ClientSession() as session:
-        markets = await fetch_all_active_markets(session, progress_callback)
+        markets = await fetch_all_active_markets(session)
         
         if not markets:
             return {"error": "No active markets"}
         
-        # Enhance markets asynchronously
         sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
-        total = len(markets)
-        enhanced_markets = []
-        
-        for i, market in enumerate(markets):
-            enhanced = await enhance_market(session, sem, market, progress_callback)
-            enhanced_markets.append(enhanced)
-            if progress_callback and (i + 1) % 10 == 0:
-                progress_callback(f"Обработано рынков: {i+1}/{total}")
+        tasks = [asyncio.create_task(enhance_market(session, sem, market)) for market in markets]
+        enhanced_markets = await asyncio.gather(*tasks)
     
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -152,8 +122,8 @@ async def main(progress_callback=None):
     }
 
 
-def run(progress_callback=None):
-    """Запуск скрипта и возврат данных"""
-    return asyncio.run(main(progress_callback))
+def run():
+    return asyncio.run(main())
+
 
 
