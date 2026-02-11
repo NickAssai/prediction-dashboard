@@ -2,4 +2,3 @@ streamlit
 requests
 aiohttp
 tqdm
-streamlit-autorefresh
