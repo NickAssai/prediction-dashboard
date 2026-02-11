@@ -1,106 +1,43 @@
 import streamlit as st
-import pandas as pd
-import json
+from api_client import fetch_opinion_raw, fetch_predict_raw
 from datetime import datetime
-from api_client import fetch_opinion_markets, fetch_predict_markets, compute_complement
 
-st.set_page_config(
-    page_title="📊 Prediction Markets Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.title("🔮 Prediction Markets Monitor")
-st.caption(f"Обновлено: {datetime.now().strftime('%H:%M:%S')}")
+st.set_page_config(page_title="🔍 Raw API Data", layout="wide")
+st.title("🔮 Сырые данные с бирж (без обработки)")
 
 OPINION_KEY = st.secrets.get("OPINION_API_KEY", "")
 PREDICT_KEY = st.secrets.get("PREDICT_API_KEY", "")
 
-@st.cache_data(ttl=30)
-def load_data():
-    opinion = fetch_opinion_markets(OPINION_KEY) if OPINION_KEY else []
-    predict = fetch_predict_markets(PREDICT_KEY) if PREDICT_KEY else []
+if st.button("🔄 Обновить данные"):
+    st.cache_data.clear()
+    st.rerun()
+
+@st.cache_data(ttl=300)
+def get_raw_data():
+    opinion = fetch_opinion_raw(OPINION_KEY) if OPINION_KEY else {"error": "No OPINION_API_KEY"}
+    predict = fetch_predict_raw(PREDICT_KEY) if PREDICT_KEY else {"error": "No PREDICT_API_KEY"}
     return opinion, predict
 
-opinion_data, predict_data = load_data()
+opinion_raw, predict_raw = get_raw_data()
 
-tab1, tab2, tab3 = st.tabs(["Opinion.Trade", "Predict.Fun", "Отладка (сырые данные)"])
+st.caption(f"Обновлено: {datetime.now().strftime('%H:%M:%S')}")
 
-# ============ Opinion.Trade ============
-with tab1:
-    if not opinion_
-        st.warning("Нет данных от Opinion.Trade — проверь API ключ")
-    else:
-        st.metric("Рынков", len(opinion_data))
-        
-        # Извлекаем ключевые поля (адаптировано под реальную структуру)
-        rows = []
-        for m in opinion_data:
-            rows.append({
-                "Название": m.get("title", m.get("name", "—")),
-                "Символ": m.get("symbol", "—"),
-                "Объём 24ч": round(float(m.get("volume24h", 0)), 2),
-                "Цена": round(float(m.get("price", m.get("currentPrice", 0))), 4),
-                "Статус": m.get("status", "—"),
-            })
-        
-        df = pd.DataFrame(rows)
-        df = df.sort_values("Объём 24ч", ascending=False).reset_index(drop=True)
-        st.dataframe(df, use_container_width=True, height=500)
+col1, col2 = st.columns(2)
 
-# ============ Predict.Fun ============
-with tab2:
-    if not predict_
-        st.warning("Нет данных от Predict.Fun — проверь API ключ")
-    else:
-        st.metric("Рынков", len(predict_data))
-        
-        rows = []
-        for m in predict_data:
-            dp = m.get("decimalPrecision", 2)
-            yes_bid = m.get("bestBid")
-            yes_ask = m.get("bestAsk")
-            
-            rows.append({
-                "Название": m.get("title", "—")[:50],
-                "Символ": m.get("symbol", "—"),
-                "Объём 24ч": round(float(m.get("volume24h", 0)), 2),
-                "Yes Buy": round(yes_ask, dp) if yes_ask else None,
-                "Yes Sell": round(yes_bid, dp) if yes_bid else None,
-                "No Buy": round(compute_complement(yes_bid, dp), dp) if yes_bid else None,
-                "No Sell": round(compute_complement(yes_ask, dp), dp) if yes_ask else None,
-            })
-        
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, height=500)
+with col1:
+    st.subheader("Opinion.Trade (сырой ответ)")
+    st.json(opinion_raw)
 
-# ============ Отладка ============
-with tab3:
-    st.subheader("Opinion.Trade — первые 2 рынка (сырой JSON)")
-    if opinion_
-        st.json(opinion_data[:2])
-    else:
-        st.code(json.dumps({"error": "Нет данных"}, indent=2), language="json")
-    
-    st.divider()
-    st.subheader("Predict.Fun — первый рынок (сырой JSON)")
-    if predict_
-        st.json(predict_data[0] if predict_data else {})
-    else:
-        st.code(json.dumps({"error": "Нет данных"}, indent=2), language="json")
-    
-    st.divider()
-    st.caption("💡 Совет: посмотри структуру выше и скажи, какие поля важны — адаптирую таблицу под твои нужды")
+with col2:
+    st.subheader("Predict.Fun (сырой ответ)")
+    st.json(predict_raw)
 
-# ============ Сайдбар ============
-with st.sidebar:
-    st.subheader("📈 Статистика")
-    st.metric("Opinion.Trade", len(opinion_data))
-    st.metric("Predict.Fun", len(predict_data))
-    
-    st.divider()
-    if st.button("🔄 Обновить данные"):
-        st.cache_data.clear()
-        st.rerun()
-    
-    st.caption("Автообновление: каждые 30 сек")
+st.sidebar.markdown("### Как использовать")
+st.sidebar.markdown("""
+1. Нажми **«Обновить данные»**
+2. В колонках — полные JSON ответы от API
+3. Ищи поля:
+   - `price`, `bestBid`, `bestAsk` — цены
+   - `symbol`, `title` — идентификаторы событий
+4. Сравнивай цены на одинаковые события между платформами
+""")
