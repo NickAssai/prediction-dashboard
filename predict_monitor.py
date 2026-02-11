@@ -25,8 +25,6 @@ HEADERS = {
 
 PAGE_SIZE = 100
 CONCURRENCY_LIMIT = 4
-DATA_DIR = "data/predictfun_snapshots"
-os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def get_complement(price, decimal_precision=2):
@@ -48,10 +46,12 @@ async def fetch(session, url, params=None, method="GET", json_data=None):
         return await response.json()
 
 
-async def fetch_all_active_markets(session):
+async def fetch_all_active_markets(session, progress_callback=None):
     """Fetch all OPEN markets with pagination, sorted by 24h volume desc"""
     markets = []
     after = None
+    page = 1
+    
     while True:
         params = {
             "status": "OPEN",
@@ -69,16 +69,20 @@ async def fetch_all_active_markets(session):
         page_markets = data.get("data", [])
         markets.extend(page_markets)
         
+        if progress_callback:
+            progress_callback(f"Страница {page}: {len(page_markets)} рынков")
+        
         after = data.get("cursor")
         if not after:
             break
         
+        page += 1
         await asyncio.sleep(0.1)
     
     return markets
 
 
-async def enhance_market(session, sem, market):
+async def enhance_market(session, sem, market, progress_callback=None):
     """Fetch additional data for a single market: orderbook, stats, compute prices"""
     async with sem:
         market_id = market["id"]
@@ -123,17 +127,23 @@ async def enhance_market(session, sem, market):
     return market
 
 
-async def main():
+async def main(progress_callback=None):
     async with aiohttp.ClientSession() as session:
-        markets = await fetch_all_active_markets(session)
+        markets = await fetch_all_active_markets(session, progress_callback)
         
         if not markets:
             return {"error": "No active markets"}
         
         # Enhance markets asynchronously
         sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
-        tasks = [asyncio.create_task(enhance_market(session, sem, market)) for market in markets]
-        enhanced_markets = await asyncio.gather(*tasks)
+        total = len(markets)
+        enhanced_markets = []
+        
+        for i, market in enumerate(markets):
+            enhanced = await enhance_market(session, sem, market, progress_callback)
+            enhanced_markets.append(enhanced)
+            if progress_callback and (i + 1) % 10 == 0:
+                progress_callback(f"Обработано рынков: {i+1}/{total}")
     
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -142,7 +152,8 @@ async def main():
     }
 
 
-def run():
+def run(progress_callback=None):
     """Запуск скрипта и возврат данных"""
-    return asyncio.run(main())
+    return asyncio.run(main(progress_callback))
+
 
