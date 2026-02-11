@@ -13,7 +13,6 @@ import aiohttp
 import json
 import os
 from datetime import datetime, timezone
-import time
 
 try:
     from tqdm import tqdm
@@ -30,8 +29,6 @@ BATCH_SIZE         = 40
 REQ_DELAY          = 0.25
 CONCURRENCY_LIMIT  = 10
 RETRY_DELAY_BASE   = 1.0
-DATA_DIR           = "data/opinion_snapshots"
-os.makedirs(DATA_DIR, exist_ok=True)
 
 
 async def fetch(session, url, params=None, retries=3):
@@ -86,7 +83,7 @@ async def process_batch(session, sem, batch):
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def main():
+async def main(progress_callback=None):
     async with aiohttp.ClientSession() as session:
         # 1. Рынки (пагинация)
         markets = []
@@ -94,12 +91,14 @@ async def main():
         while True:
             params = {"status": "activated", "marketType": 2, "limit": 20, "page": page}
             data = await fetch(session, f"{BASE_URL}/market", params)
-            if not data:
+            if not 
                 break
             page_markets = data.get("list", [])
             if not page_markets:
                 break
             markets.extend(page_markets)
+            if progress_callback:
+                progress_callback(f"Загружено страниц: {page}")
             page += 1
             await asyncio.sleep(0.2)
 
@@ -122,9 +121,15 @@ async def main():
 
         # 3. Обработка батчами
         sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
+        total = len(tokens)
+        processed = 0
+        
         for i in range(0, len(tokens), BATCH_SIZE):
             batch = tokens[i:i + BATCH_SIZE]
             await process_batch(session, sem, batch)
+            processed += len(batch)
+            if progress_callback:
+                progress_callback(f"Обработано токенов: {processed}/{total}")
             await asyncio.sleep(REQ_DELAY)
 
     return {
@@ -135,8 +140,7 @@ async def main():
     }
 
 
-def run():
+def run(progress_callback=None):
     """Запуск скрипта и возврат данных"""
-    return asyncio.run(main())
-    asyncio.run(main())
+    return asyncio.run(main(progress_callback))
 
